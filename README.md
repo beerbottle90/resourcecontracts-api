@@ -101,11 +101,19 @@ Env fallbacks: `RC_MCP_TRANSPORT`, `RC_MCP_HOST`, `RC_MCP_PORT`.
 ./run-public.sh
 ```
 
-Boots the HTTP server and a Cloudflare quick tunnel, prints a
+On **Windows** (PowerShell 5.1 or 7) use the native script instead — `&&` and
+`.sh` do not work in PowerShell:
+
+```powershell
+.\run-public.ps1
+```
+
+Both boot the HTTP server and a Cloudflare quick tunnel, then print a
 `https://<random>.trycloudflare.com/mcp` URL — paste it into the Copilot Studio
 MCP connector (`copilot-studio/mcp-connector.swagger.json` → `host`), **No auth**.
 Quick-tunnel URLs change per run; for a stable URL use a named Cloudflare tunnel
-(see `copilot-studio/RUNBOOK.md`).
+(see `copilot-studio/RUNBOOK.md`). Override the port with `RC_PORT` (`$env:RC_PORT`
+on Windows).
 
 ## Copilot Studio connectors
 
