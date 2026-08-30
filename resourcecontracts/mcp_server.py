@@ -22,7 +22,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, List, Optional, Tuple
 
 from .client import ResourceContractsClient, ResourceContractsError
-from .retrieval import semantic_rerank
+from .retrieval import embeddings_status, semantic_rerank
 
 SERVER_NAME = "resourcecontracts-api"
 SERVER_VERSION = "0.1.0"
@@ -167,6 +167,21 @@ _SEARCH_PROPS = {
     "order": {"type": "string", "enum": ["asc", "desc"], "default": "desc"},
 }
 
+
+def _t_server_status(args: Dict[str, Any]) -> Any:
+    """What this server is, and whether semantic ranking is actually live."""
+    return {
+        "server": "resourcecontracts-api",
+        "source": "ResourceContracts.org (NRGI/CCSI) - public, no auth, CC BY-SA 4.0",
+        "mode": "passthrough + local reranking (no local corpus)",
+        "known_upstream_quirks": [
+            'Ranking uses contract METADATA (name, resource, type), not clause text. Use get_contract_text or get_contract_annotations to confirm a clause is actually present.',
+            'Content is CC BY-SA 4.0 - attribution and share-alike are required.',
+        ],
+        **embeddings_status(),
+    }
+
+
 TOOLS: List[Dict[str, Any]] = [
     {
         "name": "search_contracts",
@@ -285,6 +300,17 @@ TOOLS: List[Dict[str, Any]] = [
         "description": "List the annotation category taxonomy (key clause types).",
         "inputSchema": {"type": "object", "properties": {}},
         "handler": _t_list_annotation_categories,
+    },
+    {
+        "name": "server_status",
+        "description": (
+            "What this server talks to, whether semantic ranking is "
+            "currently live, and the upstream quirks worth defending "
+            "against. Call it when results look wrong, to tell a degraded "
+            "ranking channel apart from a genuinely empty result set."
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
+        "handler": _t_server_status,
     },
 ]
 
