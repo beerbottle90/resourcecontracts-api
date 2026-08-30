@@ -22,6 +22,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, List, Optional, Tuple
 
 from .client import ResourceContractsClient, ResourceContractsError
+from .retrieval import semantic_rerank
 
 SERVER_NAME = "resourcecontracts-api"
 SERVER_VERSION = "0.1.0"
@@ -53,14 +54,49 @@ def _search_kwargs(args: Dict[str, Any]) -> Dict[str, Any]:
     return kw
 
 
+# Contract work is the case semantic ranking was made for. A lawyer looking for
+# a stabilisation clause or a change-of-control trigger is describing a CONCEPT;
+# the contract that contains it may use none of those words in its name, and the
+# upstream index scores mostly on the title and party names.
+_POOL_MULTIPLIER = 4
+_POOL_MAX = 120
+
+
 def _t_search_contracts(args: Dict[str, Any]) -> Any:
-    return _client.search(
+    per_page = int(args.get("per_page", 20))
+    rank = bool(args.get("rerank", True))
+    pool = min(max(per_page * _POOL_MULTIPLIER, per_page), _POOL_MAX) if rank else per_page
+
+    out = _client.search(
         args.get("query", ""),
         from_=int(args.get("from", 0)),
-        per_page=int(args.get("per_page", 20)),
+        per_page=pool,
         group=args.get("group", "metadata"),
         **_search_kwargs(args),
     )
+    if not rank or not isinstance(out, dict) or not (args.get("query") or "").strip():
+        return out
+
+    ranked = semantic_rerank(
+        args.get("query", ""),
+        out.get("results") or [],
+        fields=("name", "resource", "contract_type", "document_type"),
+        limit=per_page,
+    )
+    out["results"] = ranked["results"]
+    out["per_page"] = len(ranked["results"])
+    ranking = {"method": ranked["method"], "candidates_considered": pool,
+               "note": ranked.get("note") or ranked.get("warning")}
+    if "model" in ranked:
+        ranking["model"] = ranked["model"]
+    out["ranking"] = ranking
+    out["ranking_warning"] = (
+        "Reordered locally by relevance to the query. `total` is still the "
+        "upstream count. Ranking uses contract metadata (name, resource, type) "
+        "-- not clause text; use get_contract_text or get_contract_annotations "
+        "to check whether a specific clause is actually present."
+    )
+    return out
 
 
 def _t_count_contracts(args: Dict[str, Any]) -> Any:
@@ -149,6 +185,16 @@ TOOLS: List[Dict[str, Any]] = [
                 **_SEARCH_PROPS,
                 "from": {"type": "integer", "default": 0, "description": "Pagination offset."},
                 "per_page": {"type": "integer", "default": 20},
+                "rerank": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": (
+                        "Reorder results by relevance before returning them. "
+                        "Semantic when an embeddings backend is configured, BM25 "
+                        "otherwise; `ranking.method` in the response says which ran. "
+                        "Set false to inspect the raw upstream order."
+                    ),
+                },
                 "group": {"type": "string", "default": "metadata",
                           "description": "Sub-docs to embed: metadata|text|annotations."},
             },
